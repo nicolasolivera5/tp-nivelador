@@ -4,8 +4,24 @@ import socket
 
 
 def recv_all(socket: socket.socket, size):
-    return socket.recv(size)
+
+    bytes_recib = 0
+    data = b""
+    while bytes_recib < size:
+        chunk = socket.recv(size - bytes_recib)
+        if not chunk:
+            raise Exception("Socket closed before receiving all data")
+        data += chunk
+        bytes_recib += len(chunk)
+    return data
 
 
 def send_all(socket: socket.socket, bytes):
-    return socket.send(bytes)
+
+    while len(bytes) > 0:
+        bytes_sent = socket.send(bytes)
+        if bytes_sent == 0:
+            raise Exception("Socket connection broken")
+        bytes = bytes[bytes_sent:]
+
+    return None
