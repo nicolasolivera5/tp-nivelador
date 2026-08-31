@@ -100,7 +100,6 @@ func (client *Client) Run() error {
 			return err
 		}
 
-		time.Sleep(ECHO_CLIENT_MESSAGE_DELAY_MS * time.Millisecond)
 	}
 
 	if err := scanner.Err(); err != nil {
