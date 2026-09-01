@@ -1,7 +1,7 @@
 import logger
 import socket
 import safe_socket
-from services.server.src_frozen.lottery import bet
+from lottery.lottery import Bet
 
 _BIRTHDATE_SIZE = 10
 _NUMBER_SIZE = 4
@@ -11,60 +11,72 @@ _NAME_LENGTH_SIZE = 1
 _LAST_NAME_LENGTH_SIZE = 1
 
 class ServerProtocol:
-    def receive_bet(self, client_socket: socket.socket):
+    def receive_bet(self, client_socket: socket.socket) -> Bet | None:
+        action = "receive-bet"
+        try:
+            # ID de la Agencia (2 bytes)
+            agency_id_bytes = safe_socket.recv_all(client_socket, _AGENCY_ID_SIZE)
+            agency_id = int.from_bytes(agency_id_bytes, byteorder="big")
 
-        # ID de la Agencia (2 bytes)
-        agency_id_bytes = safe_socket.recv_all(client_socket, _AGENCY_ID_SIZE)
-        agency_id = int.from_bytes(agency_id_bytes, byteorder="big")
+            # tamanio del nombre (1 byte)
+            name_length_bytes = safe_socket.recv_all(client_socket, _NAME_LENGTH_SIZE)
+            name_length = int.from_bytes(name_length_bytes, byteorder="big")
 
-        # tamanio del nombre (1 byte)
-        name_length_bytes = safe_socket.recv_all(client_socket, _NAME_LENGTH_SIZE)
-        name_length = int.from_bytes(name_length_bytes, byteorder="big")
+            # cuando el tamanio del nombre es 0, es el fin de apuestas de esta agencia
+            if name_length == 0:
+                logger.info("receive-end", logger.LogResult.success, "agency_id", agency_id)
+                return None
 
-        # si la longitud del nombre es 0, terminaron las apuestas de esta agencia
-        if name_length == 0:
-            return None
+            # lectura del resto del payload
+            name_bytes = safe_socket.recv_all(client_socket, name_length)
 
-        # nombre
-        name_bytes = safe_socket.recv_all(client_socket, name_length)
+            last_name_length_bytes = safe_socket.recv_all(client_socket, _LAST_NAME_LENGTH_SIZE)
+            last_name_length = int.from_bytes(last_name_length_bytes, byteorder="big")
+            last_name_bytes = safe_socket.recv_all(client_socket, last_name_length)
 
-        # apellido
-        last_name_length_bytes = safe_socket.recv_all(client_socket, _LAST_NAME_LENGTH_SIZE)
-        last_name_length = int.from_bytes(last_name_length_bytes, byteorder="big")
-        last_name_bytes = safe_socket.recv_all(client_socket, last_name_length)
+            document_bytes = safe_socket.recv_all(client_socket, _DOCUMENT_SIZE)
+            birthdate_bytes = safe_socket.recv_all(client_socket, _BIRTHDATE_SIZE)
+            number_bytes = safe_socket.recv_all(client_socket, _NUMBER_SIZE)
 
-        # documento (4 bytes binarios)
-        document_bytes = safe_socket.recv_all(client_socket, _DOCUMENT_SIZE)
+            bet = Bet(
+                agency_id=agency_id,
+                first_name=name_bytes.decode("utf-8"),
+                last_name=last_name_bytes.decode("utf-8"),
+                document=int.from_bytes(document_bytes, byteorder="big"),
+                birthdate=birthdate_bytes.decode("utf-8"),
+                number=int.from_bytes(number_bytes, byteorder="big")
+            )
+            
+            logger.info(action, logger.LogResult.success, "agency_id", agency_id, "document", bet.document)
+            return bet
 
-        # fecha de nacimiento (10 bytes texto)
-        birthdate_bytes = safe_socket.recv_all(client_socket, _BIRTHDATE_SIZE)
-
-        # apuesta (4 bytes binarios)
-        number_bytes = safe_socket.recv_all(client_socket, _NUMBER_SIZE)
-
-        return bet.Bet(
-            agency_id=agency_id,
-            first_name=name_bytes.decode("utf-8"),
-            last_name=last_name_bytes.decode("utf-8"),
-            document=int.from_bytes(document_bytes, byteorder="big"),
-            birthdate=birthdate_bytes.decode("utf-8"),
-            number=int.from_bytes(number_bytes, byteorder="big")
-        )
+        except Exception as e:
+            logger.error(action, logger.LogResult.fail, "error", str(e))
+            raise e
     
-    def send_winners(self, client_socket: socket.socket, winners: list[bet.Bet]):
+    def send_winners(self, client_socket: socket.socket, winners: list[Bet]):
+        action = "send-winners"
+        try:
+            logger.info(action, logger.LogResult.in_progress, "count", len(winners))
 
-        # envio la cantidad de ganadores (4 bytes)
-        safe_socket.send_all(client_socket, len(winners).to_bytes(4, byteorder="big"))
+            # cantidad de ganadores (4 bytes)
+            safe_socket.send_all(client_socket, len(winners).to_bytes(4, byteorder="big"))
 
-        for winner in winners:
-            name_bytes = winner.first_name.encode("utf-8")
-            safe_socket.send_all(client_socket, len(name_bytes).to_bytes(_NAME_LENGTH_SIZE, byteorder="big"))
-            safe_socket.send_all(client_socket, name_bytes)
+            for winner in winners:
+                name_bytes = winner.first_name.encode("utf-8")
+                safe_socket.send_all(client_socket, len(name_bytes).to_bytes(_NAME_LENGTH_SIZE, byteorder="big"))
+                safe_socket.send_all(client_socket, name_bytes)
 
-            last_name_bytes = winner.last_name.encode("utf-8")
-            safe_socket.send_all(client_socket, len(last_name_bytes).to_bytes(_LAST_NAME_LENGTH_SIZE, byteorder="big"))
-            safe_socket.send_all(client_socket, last_name_bytes)
+                last_name_bytes = winner.last_name.encode("utf-8")
+                safe_socket.send_all(client_socket, len(last_name_bytes).to_bytes(_LAST_NAME_LENGTH_SIZE, byteorder="big"))
+                safe_socket.send_all(client_socket, last_name_bytes)
 
-            safe_socket.send_all(client_socket, winner.document.to_bytes(_DOCUMENT_SIZE, byteorder="big"))
-            safe_socket.send_all(client_socket, winner.birthdate.encode("utf-8"))
-            safe_socket.send_all(client_socket, winner.number.to_bytes(_NUMBER_SIZE, byteorder="big"))
+                safe_socket.send_all(client_socket, winner.document.to_bytes(_DOCUMENT_SIZE, byteorder="big"))
+                safe_socket.send_all(client_socket, winner.birthdate.encode("utf-8"))
+                safe_socket.send_all(client_socket, winner.number.to_bytes(_NUMBER_SIZE, byteorder="big"))
+
+            logger.info(action, logger.LogResult.success, "count", len(winners))
+
+        except Exception as e:
+            logger.error(action, logger.LogResult.fail, "error", str(e))
+            raise e

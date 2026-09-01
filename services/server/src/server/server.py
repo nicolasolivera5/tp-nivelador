@@ -1,38 +1,46 @@
 import socket
 import logger
-import safe_socket
-
-_ECHO_SERVER_MESSAGE_SIZE = 1024
+from lottery.lottery import Lottery, Bet
+from .server_protocol import ServerProtocol
 
 
 class Server:
-    def __init__(self, server_host: str, server_port: int) -> None:
+    def __init__(self, server_host: str, server_port: int, storage_path: str) -> None:
         self.server_host = server_host
         self.server_port = server_port
+        self.lottery = Lottery(storage_path)
+        self.protocol = ServerProtocol()
 
     def _handle_client(self, client_socket):
         action = "handle-client"
-        message_amount = 0
+        received_bets: list[Bet] = []
         try:
             logger.info(action, logger.LogResult.in_progress)
             while True:
-                client_message = safe_socket.recv_all(
-                    client_socket, _ECHO_SERVER_MESSAGE_SIZE
-                )
-                if not client_message:
-                    logger.info(
-                        action,
-                        logger.LogResult.success,
-                        "messages-amount",
-                        message_amount,
-                    )
-                    return
-                message_amount += 1
-                safe_socket.send_all(client_socket, client_message)
-        except Exception as e:
-            logger.error(
-                action, logger.LogResult.fail, "messages-amount", message_amount
+                         
+                bet_reciv = self.protocol.receive_bet(client_socket)
+                if bet_reciv is None:
+                    break
+                received_bets.append(bet_reciv)
+
+            self.lottery.store_bets(received_bets)
+            
+            agency_winners = [
+                b for b in self.lottery.load_bets() 
+                if self.lottery.has_won(b)
+            ]
+            
+            self.protocol.send_winners(client_socket, agency_winners)
+
+            logger.info(
+                action,
+                logger.LogResult.success,
+                "bets-processed",
+                len(received_bets),
             )
+
+        except Exception as e:
+            logger.error(action, logger.LogResult.fail, "error", str(e))
             raise e
 
     def run(self):

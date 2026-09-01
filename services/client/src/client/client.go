@@ -6,15 +6,10 @@ import (
 	"os"
 	"bufio"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
-	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
 )
 
 const CONNECTION_ATTEMPTS_MAX = 3
 const CONNECTION_ATTEMPS_DELAY_MS = 2000
-
-const ECHO_CLIENT_BUFFER_SIZE = 512
-const ECHO_CLIENT_MESSAGE_AMOUNT = 3
-const ECHO_CLIENT_MESSAGE_DELAY_MS = 1000
 
 type ClientConfig struct {
 	ServerHost string
@@ -27,6 +22,7 @@ type ClientConfig struct {
 type Client struct {
 	conn   net.Conn
 	config ClientConfig
+	protocol *ClientProtocol
 }
 
 func NewClient(config ClientConfig) (*Client, error) {
@@ -36,7 +32,9 @@ func NewClient(config ClientConfig) (*Client, error) {
 		return nil, err
 	}
 
-	client := &Client{conn: conn, config: config}
+	protocol := NewClientProtocol(conn, config.AgencyId)
+
+	client := &Client{conn: conn, config: config, protocol: protocol}
 	return client, nil
 }
 
@@ -82,32 +80,35 @@ func (client *Client) Run() error {
 	scanner := bufio.NewScanner(inputFile)
 
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := scanner.Bytes()
 
-		if err := safe_socket.SendAll(client.conn, []byte(line)); err != nil {
-			logger.Error("send-bet", logger.Fail, "line", line, "err", err)
+		if err := client.protocol.SendBet(line); err != nil {
+			logger.Error("send-bet", logger.Fail, "line", string(line), "err", err)
 			return err
 		}
-
-		responseBuffer, err := safe_socket.RecvAll(client.conn, ECHO_CLIENT_BUFFER_SIZE)
-		if err != nil {
-			logger.Error("recv-response", logger.Fail, "line", line, "err", err)
-			return err
-		}
-
-		if _, err := outputFile.WriteString(string(responseBuffer) + "\n"); err != nil {
-			logger.Error("write-output-file", logger.Fail, "line", line, "err", err)
-			return err
-		}
-
 	}
 
-	if err := scanner.Err(); err != nil {
-		logger.Error("scan-input-file", logger.Fail, "err", err)
+	if err := client.protocol.SendEnd(); err != nil {
+		logger.Error("send-end", logger.Fail, "err", err)
 		return err
 	}
 
-	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
+	winners, err := client.protocol.ReceiveWinners()
+	if err != nil {
+		logger.Error("receive-winners", logger.Fail, "err", err)
+		return err
+	}
 
+	writer := bufio.NewWriter(outputFile)
+	for _, winner := range winners {
+		if _, err := writer.WriteString(winner + "\n"); err != nil {
+			logger.Error("write-output-file", logger.Fail, "err", err)
+			return err
+		}
+	}
+
+	writer.Flush()
+
+	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
 	return nil
 }

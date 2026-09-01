@@ -1,4 +1,4 @@
-package client_protocol
+package client
 
 import (
 	"bytes"
@@ -36,6 +36,7 @@ func NewClientProtocol(conn net.Conn, agencyId string) *ClientProtocol {
 func (cp *ClientProtocol) SendBet(message []byte) error {
 	parts := bytes.Split(message, []byte(","))
 	if len(parts) < 5 {
+		logger.Error("send-bet", logger.Fail, "error", "invalid bet format")
 		return errors.New("invalid bet format")
 	}
 
@@ -46,20 +47,24 @@ func (cp *ClientProtocol) SendBet(message []byte) error {
 	number := parts[4]
 
 	if len(firstName) > NAME_MAX_LENGTH || len(lastName) > LAST_NAME_MAX_LENGTH {
+		logger.Error("send-bet", logger.Fail, "error", "name too long")
 		return errors.New("name too long")
 	}
 
 	docNum, err := strconv.Atoi(string(document))
 	if err != nil {
-		return fmt.Errorf("invalid document: %w", err)
+		logger.Error("send-bet", logger.Fail, "error", "invalid document format")
+		return err
 	}
 	betNum, err := strconv.Atoi(string(number))
 	if err != nil {
-		return fmt.Errorf("invalid bet number: %w", err)
+		logger.Error("send-bet", logger.Fail, "error", "invalid bet number")
+		return err
 	}
 	agencyIdNum, err := strconv.Atoi(cp.AgencyId)
 	if err != nil {
-		return fmt.Errorf("invalid agency ID: %w", err)
+		logger.Error("send-bet", logger.Fail, "error", "invalid agency ID")
+		return err
 	}
 
 	// agency_id(2) + len_name(1) + name + len_last(1) + last + doc(4) + birth(10) + bet(4)
@@ -93,7 +98,8 @@ func (cp *ClientProtocol) SendBet(message []byte) error {
 	binary.BigEndian.PutUint32(buffer[cursor:], uint32(betNum))
 
 	if err := safe_socket.SendAll(cp.conn, buffer); err != nil {
-		return fmt.Errorf("failed to send bet: %w", err)
+		logger.Error("send-bet", logger.Fail, "error", "failed to send bet")
+		return err
 	}
 
 	return nil
@@ -103,22 +109,27 @@ func (cp *ClientProtocol) SendBet(message []byte) error {
 func (cp *ClientProtocol) SendEnd() error {
 	agencyIdNum, err := strconv.Atoi(cp.AgencyId)
 	if err != nil {
-		return fmt.Errorf("invalid agency ID: %w", err)
+		logger.Error("send-end", logger.Fail, "error", "invalid agency ID")
+		return err
 	}
 
 	buffer := make([]byte, AGENCY_ID_SIZE+1)
 	binary.BigEndian.PutUint16(buffer[0:], uint16(agencyIdNum))
 	buffer[2] = 0 // nombre de tamanio 0 para indicar que no hay mas
 
-	return safe_socket.SendAll(cp.conn, buffer)
+	if err := safe_socket.SendAll(cp.conn, buffer); err != nil {
+		logger.Error("send-end", logger.Fail, "error", "failed to send end")
+		return err
+	}
+	return nil
 }
-
 func (cp *ClientProtocol) ReceiveWinners() ([]string, error) {
 	
 	// cantidad de ganadores (4 bytes)
 	amountBuffer, err := safe_socket.RecvAll(cp.conn, 4)
 	if err != nil {
-		return nil, fmt.Errorf("failed to receive winners count: %w", err)
+		logger.Error("receive-winners", logger.Fail, "error", "failed to receive winners count")
+		return nil, err
 	}
 
 	winnersCount := binary.BigEndian.Uint32(amountBuffer)
@@ -129,30 +140,35 @@ func (cp *ClientProtocol) ReceiveWinners() ([]string, error) {
 		// nombre
 		nameLenBuf, err := safe_socket.RecvAll(cp.conn, NAME_LENGTH_SIZE)
 		if err != nil {
+			logger.Error("receive-winners", logger.Fail, "error", "failed to receive winner name length")
 			return nil, err
 		}
 		nameLen := int(nameLenBuf[0])
 
 		nameBuf, err := safe_socket.RecvAll(cp.conn, nameLen)
 		if err != nil {
+			logger.Error("receive-winners", logger.Fail, "error", "failed to receive winner name")
 			return nil, err
 		}
 
 		// apellido
 		lastNameLenBuf, err := safe_socket.RecvAll(cp.conn, LAST_NAME_LENGTH_SIZE)
 		if err != nil {
+			logger.Error("receive-winners", logger.Fail, "error", "failed to receive winner last name length")
 			return nil, err
 		}
 		lastNameLen := int(lastNameLenBuf[0])
 
 		lastNameBuf, err := safe_socket.RecvAll(cp.conn, lastNameLen)
 		if err != nil {
+			logger.Error("receive-winners", logger.Fail, "error", "failed to receive winner last name")
 			return nil, err
 		}
 
 		// documento (4)
 		docBuf, err := safe_socket.RecvAll(cp.conn, DOCUMENT_SIZE)
 		if err != nil {
+			logger.Error("receive-winners", logger.Fail, "error", "failed to receive winner document")
 			return nil, err
 		}
 		doc := binary.BigEndian.Uint32(docBuf)
@@ -160,12 +176,14 @@ func (cp *ClientProtocol) ReceiveWinners() ([]string, error) {
 		// fecha de nacimiento (10)
 		birthBuf, err := safe_socket.RecvAll(cp.conn, BIRTHDATE_SIZE)
 		if err != nil {
+			logger.Error("receive-winners", logger.Fail, "error", "failed to receive winner birth date")
 			return nil, err
 		}
 
 		// apuesta (4)
 		numBuf, err := safe_socket.RecvAll(cp.conn, NUMBER_SIZE)
 		if err != nil {
+			logger.Error("receive-winners", logger.Fail, "error", "failed to receive winner number")
 			return nil, err
 		}
 		num := binary.BigEndian.Uint32(numBuf)
