@@ -18,10 +18,10 @@ class Server:
             logger.info(action, logger.LogResult.in_progress)
             while True:
                          
-                bet_reciv = self.protocol.receive_bet(client_socket)
-                if bet_reciv is None:
+                batch_reciv = self.protocol.receive_batch(client_socket)
+                if batch_reciv is None:
                     break
-                received_bets.append(bet_reciv)
+                received_bets.extend(batch_reciv)
 
             self.lottery.store_bets(received_bets)
             

@@ -1,10 +1,12 @@
 package client
 
 import (
-	"net"
-	"time"
-	"os"
 	"bufio"
+	"net"
+	"os"
+	"strconv"
+	"time"
+
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 )
 
@@ -63,6 +65,12 @@ func (client *Client) Run() error {
 	const mainAction = "read-and-send-bets"
 	defer client.conn.Close()
 
+	batchSizeStr := os.Getenv("BATCH_SIZE")
+	batchSize, err := strconv.Atoi(batchSizeStr)
+	if err != nil || batchSize <= 0 {
+		batchSize = 10 
+	}
+
 	inputFile, err := os.Open(client.config.InputFile)
 	if err != nil {
 		logger.Error("open-input-file", logger.Fail, "err", err)
@@ -78,12 +86,25 @@ func (client *Client) Run() error {
 	defer outputFile.Close()
 
 	scanner := bufio.NewScanner(inputFile)
+	batch := make([][]byte, 0, batchSize)
 
 	for scanner.Scan() {
-		line := scanner.Bytes()
+		line := append([]byte(nil), scanner.Bytes()...)
+		batch = append(batch, line)
 
-		if err := client.protocol.SendBet(line); err != nil {
-			logger.Error("send-bet", logger.Fail, "line", string(line), "err", err)
+		if len(batch) == batchSize {
+			if err := client.protocol.SendBatch(batch); err != nil {
+				logger.Error("send-batch", logger.Fail, "err", err)
+				return err
+			}
+			batch = batch[:0] 
+		}
+	}
+
+	// enviamos si las lineas que quedaron en el batch
+	if len(batch) > 0 {
+		if err := client.protocol.SendBatch(batch); err != nil {
+			logger.Error("send-batch", logger.Fail, "err", err)
 			return err
 		}
 	}

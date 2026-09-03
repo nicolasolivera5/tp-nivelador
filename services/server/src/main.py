@@ -3,14 +3,11 @@ import sys
 
 import logger
 import server
-from pathlib import Path
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
-STORAGE_FILE = Path(__file__).resolve().parent / "server" / "storage" / "bets.csv"
-
-STORAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
-STORAGE_FILE.touch(exist_ok=True)
+STORAGE_FILE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "bets.csv"))
+os.makedirs(os.path.dirname(STORAGE_FILE), exist_ok=True)
 
 def main():
     logger.init()
