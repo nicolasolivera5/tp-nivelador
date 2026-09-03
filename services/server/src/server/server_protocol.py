@@ -23,7 +23,7 @@ class ServerProtocol:
             agency_id = int.from_bytes(header_bytes[:2], byteorder="big")
             count = int.from_bytes(header_bytes[2:4], byteorder="big")
 
-            # fin de envíos de esta agencia
+            # fin de envios de esta agencia
             if count == 0:
                 # mandamos ACK de fin y salir
                 safe_socket.send_all(client_socket, b"\x00")
@@ -59,7 +59,7 @@ class ServerProtocol:
             # mandamos al cliente que el batch fue procesado correctamente
             safe_socket.send_all(client_socket, b"\x00")
 
-            logger.info(action, logger.LogResult.success, "agency_id", agency_id, "batch_size", len(bets))
+            #logger.info(action, logger.LogResult.success, "agency_id", agency_id, "batch_size", len(bets))
             return bets
 
         except Exception as e:

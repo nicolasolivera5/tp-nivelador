@@ -1,47 +1,19 @@
 import socket
 import logger
-from lottery.lottery import Lottery, Bet
-from .server_protocol import ServerProtocol
+import threading
+import os
+from  .clientHandle import ClientHandle
 
+STORAGE_FILE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "bets.csv"))
+os.makedirs(os.path.dirname(STORAGE_FILE), exist_ok=True)
 
 class Server:
-    def __init__(self, server_host: str, server_port: int, storage_path: str) -> None:
+    def __init__(self, server_host: str, server_port: int) -> None:
         self.server_host = server_host
         self.server_port = server_port
-        self.lottery = Lottery(storage_path)
-        self.protocol = ServerProtocol()
-
-    def _handle_client(self, client_socket):
-        action = "handle-client"
-        received_bets: list[Bet] = []
-        try:
-            logger.info(action, logger.LogResult.in_progress)
-            while True:
-                         
-                batch_reciv = self.protocol.receive_batch(client_socket)
-                if batch_reciv is None:
-                    break
-                received_bets.extend(batch_reciv)
-
-            self.lottery.store_bets(received_bets)
-            
-            agency_winners = [
-                b for b in self.lottery.load_bets() 
-                if self.lottery.has_won(b)
-            ]
-            
-            self.protocol.send_winners(client_socket, agency_winners)
-
-            logger.info(
-                action,
-                logger.LogResult.success,
-                "bets-processed",
-                len(received_bets),
-            )
-
-        except Exception as e:
-            logger.error(action, logger.LogResult.fail, "error", str(e))
-            raise e
+        self.storage_path = STORAGE_FILE
+        self.barrier_agency_quorum = threading.Barrier(int(os.environ["AGENCY_QUORUM_MIN"]))
+        self.lock_lottery = threading.Lock()
 
     def run(self):
         action = "accept-connection"
@@ -56,5 +28,5 @@ class Server:
                     logger.error(action, logger.LogResult.fail)
                     raise e
                 logger.info(action, logger.LogResult.success)
-
-                self._handle_client(client_socket)
+                client_handle = ClientHandle(client_socket, self.storage_path, self.barrier_agency_quorum, self.lock_lottery)
+                client_handle.start()

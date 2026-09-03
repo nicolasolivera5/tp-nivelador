@@ -6,12 +6,10 @@ import server
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
-STORAGE_FILE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "bets.csv"))
-os.makedirs(os.path.dirname(STORAGE_FILE), exist_ok=True)
 
 def main():
     logger.init()
-    s = server.Server(SERVER_HOST, SERVER_PORT, str(STORAGE_FILE))
+    s = server.Server(SERVER_HOST, SERVER_PORT)
     try:
         s.run()
     except Exception as e:
