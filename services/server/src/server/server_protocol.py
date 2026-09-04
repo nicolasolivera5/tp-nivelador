@@ -71,21 +71,26 @@ class ServerProtocol:
         try:
             logger.info(action, logger.LogResult.in_progress, "count", len(winners))
 
+            # buffer unico para todo el payload
+            payload = bytearray()
+
             # cantidad de ganadores (4 bytes)
-            safe_socket.send_all(client_socket, len(winners).to_bytes(4, byteorder="big"))
+            payload.extend(len(winners).to_bytes(4, byteorder="big"))
 
             for winner in winners:
                 name_bytes = winner.first_name.encode("utf-8")
-                safe_socket.send_all(client_socket, len(name_bytes).to_bytes(_NAME_LENGTH_SIZE, byteorder="big"))
-                safe_socket.send_all(client_socket, name_bytes)
+                payload.extend(len(name_bytes).to_bytes(_NAME_LENGTH_SIZE, byteorder="big"))
+                payload.extend(name_bytes)
 
                 last_name_bytes = winner.last_name.encode("utf-8")
-                safe_socket.send_all(client_socket, len(last_name_bytes).to_bytes(_LAST_NAME_LENGTH_SIZE, byteorder="big"))
-                safe_socket.send_all(client_socket, last_name_bytes)
+                payload.extend(len(last_name_bytes).to_bytes(_LAST_NAME_LENGTH_SIZE, byteorder="big"))
+                payload.extend(last_name_bytes)
 
-                safe_socket.send_all(client_socket, winner.document.to_bytes(_DOCUMENT_SIZE, byteorder="big"))
-                safe_socket.send_all(client_socket, winner.birthdate.encode("utf-8"))
-                safe_socket.send_all(client_socket, winner.number.to_bytes(_NUMBER_SIZE, byteorder="big"))
+                payload.extend(winner.document.to_bytes(_DOCUMENT_SIZE, byteorder="big"))
+                payload.extend(winner.birthdate.encode("utf-8"))
+                payload.extend(winner.number.to_bytes(_NUMBER_SIZE, byteorder="big"))
+
+            safe_socket.send_all(client_socket, bytes(payload))
 
             logger.info(action, logger.LogResult.success, "count", len(winners))
 

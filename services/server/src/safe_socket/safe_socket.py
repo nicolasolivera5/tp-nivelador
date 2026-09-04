@@ -20,8 +20,6 @@ def send_all(socket: socket.socket, bytes):
 
     while len(bytes) > 0:
         bytes_sent = socket.send(bytes)
-        if bytes_sent == 0:
-            raise Exception("Socket connection broken")
         bytes = bytes[bytes_sent:]
 
     return None
