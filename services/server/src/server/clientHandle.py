@@ -44,13 +44,15 @@ class ClientHandle(threading.Thread):
 
             self.protocol.send_winners(self.client_socket, agency_winners)
 
+
             logger.info(
                 action,
                 logger.LogResult.success,
                 "bets-processed",
                 total_bets_received,
             )
-
+        except threading.BrokenBarrierError:
+                logger.error(action, logger.LogResult.fail, "error", "Barrier broken")
         except Exception as e:
             logger.error(action, logger.LogResult.fail, "error", str(e))
             raise e

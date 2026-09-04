@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+	"syscall"
+	"os/signal"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 )
@@ -63,7 +65,18 @@ func connectToServer(host, port string) (net.Conn, error) {
 
 func (client *Client) Run() error {
 	const mainAction = "read-and-send-bets"
+	var isShuttingDown bool
 	defer client.conn.Close()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
+	go func() {
+        <-sigChan
+        isShuttingDown = true
+        logger.Info("client-shutdown", logger.Success, "reason", "SIGTERM received")
+        client.conn.Close()
+    }()
 
 	batchSizeStr := os.Getenv("BATCH_SIZE")
 	batchSize, err := strconv.Atoi(batchSizeStr)
@@ -116,6 +129,12 @@ func (client *Client) Run() error {
 
 	winners, err := client.protocol.ReceiveWinners()
 	if err != nil {
+
+		if isShuttingDown {
+            // Si el error ocurrió debido a la cancelación por SIGTERM, es un apagado limpio
+            return nil
+        }
+		
 		logger.Error("receive-winners", logger.Fail, "err", err)
 		return err
 	}
