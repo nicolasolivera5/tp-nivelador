@@ -3,7 +3,7 @@ import logger
 import threading
 import os
 import signal
-from  .clientHandle import ClientHandle
+from  .client_handle import ClientHandle, ReadWriteLock
 
 STORAGE_FILE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "bets.csv"))
 os.makedirs(os.path.dirname(STORAGE_FILE), exist_ok=True)
@@ -13,24 +13,23 @@ class Server:
         self.server_host = server_host
         self.server_port = server_port
         self.storage_path = STORAGE_FILE
-        self.barrier_agency_quorum = threading.Barrier(int(os.environ["AGENCY_QUORUM_MIN"]))
-        self.lock_lottery = threading.Lock()
+        self.agency_quorum_min = int(os.environ["AGENCY_QUORUM_MIN"])
+        self.agency_counter = [0]                   
+        self.agency_counter_lock = threading.Lock() 
+        self.lottery_ready_event = threading.Event() 
+        self.rw_lock = ReadWriteLock()              
         
         self.running = True
         self.server_socket = None
         self.client_threads = []
 
         signal.signal(signal.SIGTERM, self._handle_signal)
-        #signal.signal(signal.SIGINT, self._handle_signal)
-
+    
     def _handle_signal(self, signum, frame):
         logger.info("signal-handler", logger.LogResult.in_progress, "signal", signum)
         self.running = False
         
-        try:
-            self.barrier_agency_quorum.abort()
-        except Exception:
-            pass
+        self.lottery_ready_event.set()
 
         if self.server_socket:
             try:
@@ -60,10 +59,13 @@ class Server:
             logger.info(action, logger.LogResult.success)
             
             client_handle = ClientHandle(
-                client_socket, 
-                self.storage_path, 
-                self.barrier_agency_quorum, 
-                self.lock_lottery
+                client_socket,
+                self.storage_path,
+                self.agency_quorum_min,
+                self.agency_counter,
+                self.agency_counter_lock,
+                self.lottery_ready_event,
+                self.rw_lock,
             )
             client_handle.start()
             self.client_threads.append(client_handle)

@@ -3,22 +3,37 @@ import logger
 import threading
 from lottery.lottery import Lottery, Bet
 from .server_protocol import ServerProtocol
+from .rw_lock import ReadWriteLock
 
 
 class ClientHandle(threading.Thread):
-    def __init__(self, client_socket: socket.socket, storage_path: str,barrier_agency_quorum: threading.Barrier, lock_lottery: threading.Lock) -> None:
+    def __init__(
+        self,
+        client_socket: socket.socket,
+        storage_path: str,
+        agency_quorum_min: int,
+        agency_counter: list,
+        agency_counter_lock: threading.Lock,
+        lottery_ready_event: threading.Event,
+        rw_lock: ReadWriteLock,
+    ) -> None:
         super().__init__()
         self.client_socket = client_socket
         self.lottery = Lottery(storage_path)
         self.protocol = ServerProtocol()
-        self.barrier_agency_quorum = barrier_agency_quorum
-        self.lock_lottery = lock_lottery
+        self.agency_quorum_min = agency_quorum_min
+        self.agency_counter = agency_counter        
+        self.agency_counter_lock = agency_counter_lock
+        self.lottery_ready_event = lottery_ready_event
+        self.rw_lock = rw_lock
+
     def run(self) -> None:
         action = "handle-client"
         agency_id = None
         total_bets_received = 0
         try:
             logger.info(action, logger.LogResult.in_progress)
+
             while True:
                 batch_reciv = self.protocol.receive_batch(self.client_socket)
                 if batch_reciv is None:
@@ -29,21 +44,33 @@ class ClientHandle(threading.Thread):
 
                 total_bets_received += len(batch_reciv)
 
-                with self.lock_lottery:
+                self.rw_lock.acquire_write()
+                try:
                     self.lottery.store_bets(batch_reciv)
+                finally:
+                    self.rw_lock.release_write()
 
-            self.barrier_agency_quorum.wait()
+            # aumentamos el contador de agencias que terminaron y verificamos si se alcanza el quórum
+            with self.agency_counter_lock:
+                self.agency_counter[0] += 1
+                if self.agency_counter[0] >= self.agency_quorum_min:
+                    self.lottery_ready_event.set()  
 
-            with self.lock_lottery:
+            # si no hay quórum, esperamos a que se alcance antes de procesar las apuestas
+            self.lottery_ready_event.wait()
+
+            self.rw_lock.acquire_read()
+            try:
                 all_bets = self.lottery.load_bets()
+            finally:
+                self.rw_lock.release_read()
 
             agency_winners = [
-                b for b in all_bets 
+                b for b in all_bets
                 if b.agency_id == agency_id and self.lottery.has_won(b)
             ]
 
             self.protocol.send_winners(self.client_socket, agency_winners)
-
 
             logger.info(
                 action,
@@ -51,8 +78,6 @@ class ClientHandle(threading.Thread):
                 "bets-processed",
                 total_bets_received,
             )
-        except threading.BrokenBarrierError:
-                logger.error(action, logger.LogResult.fail, "error", "Barrier broken")
         except Exception as e:
             logger.error(action, logger.LogResult.fail, "error", str(e))
             raise e
