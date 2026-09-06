@@ -42,18 +42,18 @@ class ServerProtocol:
                 last_name_length = int.from_bytes(last_name_length_bytes, byteorder="big")
                 last_name_bytes = safe_socket.recv_all(client_socket, last_name_length)
 
-                document_bytes = safe_socket.recv_all(client_socket, _DOCUMENT_SIZE)
-                birthdate_bytes = safe_socket.recv_all(client_socket, _BIRTHDATE_SIZE)
-                number_bytes = safe_socket.recv_all(client_socket, _NUMBER_SIZE)
+                # campos fijos: documento (4) + fecha nacimiento (10) + numero (4) = 18 bytes
+                fixed_bytes = safe_socket.recv_all(client_socket, _DOCUMENT_SIZE + _BIRTHDATE_SIZE + _NUMBER_SIZE)
 
                 bet = Bet(
                     agency_id=agency_id,
                     first_name=name_bytes.decode("utf-8"),
                     last_name=last_name_bytes.decode("utf-8"),
-                    document=int.from_bytes(document_bytes, byteorder="big"),
-                    birthdate=birthdate_bytes.decode("utf-8"),
-                    number=int.from_bytes(number_bytes, byteorder="big")
+                    document=int.from_bytes(fixed_bytes[:_DOCUMENT_SIZE], byteorder="big"),
+                    birthdate=fixed_bytes[_DOCUMENT_SIZE:_DOCUMENT_SIZE + _BIRTHDATE_SIZE].decode("utf-8"),
+                    number=int.from_bytes(fixed_bytes[_DOCUMENT_SIZE + _BIRTHDATE_SIZE:], byteorder="big")
                 )
+
                 bets.append(bet)
 
             # mandamos al cliente que el batch fue procesado correctamente

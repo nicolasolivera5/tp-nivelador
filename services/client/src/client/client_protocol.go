@@ -3,9 +3,10 @@ package client
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"net"
 	"strconv"
-	"errors"
+
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
 )
@@ -33,58 +34,61 @@ func NewClientProtocol(conn net.Conn, agencyId string) *ClientProtocol {
 }
 
 func (cp *ClientProtocol) SendBatch(lines [][]byte) error {
-	 
+
 	type parsedBet struct {
-        firstName, lastName, birthdate []byte
-        docNum, betNum                 uint32
-    }
+		firstName, lastName, birthdate []byte
+		docNum, betNum                 uint32
+	}
 
 	agencyIdNum, err := strconv.Atoi(cp.AgencyId)
 	if err != nil {
 		logger.Warn("send-batch", logger.Fail, "error", "invalid agency ID")
 		return err
 	}
-	
-    bets := make([]parsedBet, 0, len(lines))
-    totalSize := AGENCY_ID_SIZE + BATCH_COUNT_SIZE
-    for _, line := range lines {
-        parts := bytes.SplitN(line, []byte(","), 5)
-        if len(parts) < 5 {
-            return errors.New("invalid bet format")
-        }
-        docNum, err := strconv.Atoi(string(parts[2]))
-        if err != nil { return err }
-        betNum, err := strconv.Atoi(string(parts[4]))
-        if err != nil { return err }
-        bet := parsedBet{
-            firstName: parts[0], lastName: parts[1],
-            birthdate: parts[3],
-            docNum: uint32(docNum), betNum: uint32(betNum),
-        }
-        if len(bet.firstName) > NAME_MAX_LENGTH || len(bet.lastName) > LAST_NAME_MAX_LENGTH {
-            return errors.New("name too long")
-        }
-        totalSize += NAME_LENGTH_SIZE + len(bet.firstName) +
-                     LAST_NAME_LENGTH_SIZE + len(bet.lastName) +
-                     DOCUMENT_SIZE + BIRTHDATE_SIZE + NUMBER_SIZE
-        bets = append(bets, bet)
-    }
 
-	
-    payload := make([]byte, AGENCY_ID_SIZE+BATCH_COUNT_SIZE, totalSize)
-    binary.BigEndian.PutUint16(payload[0:], uint16(agencyIdNum))
-    binary.BigEndian.PutUint16(payload[2:], uint16(len(bets)))
-    for _, bet := range bets {
-        payload = append(payload, byte(len(bet.firstName)))
-        payload = append(payload, bet.firstName...)
-        payload = append(payload, byte(len(bet.lastName)))
-        payload = append(payload, bet.lastName...)
-        payload = payload[:len(payload)+DOCUMENT_SIZE]
-        binary.BigEndian.PutUint32(payload[len(payload)-DOCUMENT_SIZE:], bet.docNum)
-        payload = append(payload, bet.birthdate...)
-        payload = payload[:len(payload)+NUMBER_SIZE]
-        binary.BigEndian.PutUint32(payload[len(payload)-NUMBER_SIZE:], bet.betNum)
-    }
+	bets := make([]parsedBet, 0, len(lines))
+	totalSize := AGENCY_ID_SIZE + BATCH_COUNT_SIZE
+	for _, line := range lines {
+		parts := bytes.SplitN(line, []byte(","), 5)
+		if len(parts) < 5 {
+			return errors.New("invalid bet format")
+		}
+		docNum, err := strconv.Atoi(string(parts[2]))
+		if err != nil {
+			return err
+		}
+		betNum, err := strconv.Atoi(string(parts[4]))
+		if err != nil {
+			return err
+		}
+		bet := parsedBet{
+			firstName: parts[0], lastName: parts[1],
+			birthdate: parts[3],
+			docNum:    uint32(docNum), betNum: uint32(betNum),
+		}
+		if len(bet.firstName) > NAME_MAX_LENGTH || len(bet.lastName) > LAST_NAME_MAX_LENGTH {
+			return errors.New("name too long")
+		}
+		totalSize += NAME_LENGTH_SIZE + len(bet.firstName) +
+			LAST_NAME_LENGTH_SIZE + len(bet.lastName) +
+			DOCUMENT_SIZE + BIRTHDATE_SIZE + NUMBER_SIZE
+		bets = append(bets, bet)
+	}
+
+	payload := make([]byte, AGENCY_ID_SIZE+BATCH_COUNT_SIZE, totalSize)
+	binary.BigEndian.PutUint16(payload[0:], uint16(agencyIdNum))
+	binary.BigEndian.PutUint16(payload[2:], uint16(len(bets)))
+	for _, bet := range bets {
+		payload = append(payload, byte(len(bet.firstName)))
+		payload = append(payload, bet.firstName...)
+		payload = append(payload, byte(len(bet.lastName)))
+		payload = append(payload, bet.lastName...)
+		payload = payload[:len(payload)+DOCUMENT_SIZE]
+		binary.BigEndian.PutUint32(payload[len(payload)-DOCUMENT_SIZE:], bet.docNum)
+		payload = append(payload, bet.birthdate...)
+		payload = payload[:len(payload)+NUMBER_SIZE]
+		binary.BigEndian.PutUint32(payload[len(payload)-NUMBER_SIZE:], bet.betNum)
+	}
 
 	// enviamos el batch completo por la red
 	if err := safe_socket.SendAll(cp.conn, payload); err != nil {
@@ -92,7 +96,7 @@ func (cp *ClientProtocol) SendBatch(lines [][]byte) error {
 		return err
 	}
 
-	// espero el ACK 
+	// espero el ACK
 	ackBuf, err := safe_socket.RecvAll(cp.conn, 1)
 	if err != nil || ackBuf[0] != 0 {
 		errAck := errors.New("batch submission not acknowledged")
@@ -125,7 +129,7 @@ func (cp *ClientProtocol) SendEnd() error {
 }
 
 func (cp *ClientProtocol) ReceiveWinners() ([]string, error) {
-	
+
 	// cantidad de ganadores (4 bytes)
 	amountBuffer, err := safe_socket.RecvAll(cp.conn, 4)
 	if err != nil {
@@ -137,7 +141,7 @@ func (cp *ClientProtocol) ReceiveWinners() ([]string, error) {
 	winners := make([]string, 0, winnersCount)
 
 	for i := uint32(0); i < winnersCount; i++ {
-		
+
 		// nombre
 		nameLenBuf, err := safe_socket.RecvAll(cp.conn, NAME_LENGTH_SIZE)
 		if err != nil {
@@ -166,28 +170,15 @@ func (cp *ClientProtocol) ReceiveWinners() ([]string, error) {
 			return nil, err
 		}
 
-		// documento (4)
-		docBuf, err := safe_socket.RecvAll(cp.conn, DOCUMENT_SIZE)
+		// campos fijos: documento (4) + fecha nacimiento (10) + numero (4) = 18 bytes
+		fixedBuf, err := safe_socket.RecvAll(cp.conn, DOCUMENT_SIZE+BIRTHDATE_SIZE+NUMBER_SIZE)
 		if err != nil {
-			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner document")
+			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner fixed fields")
 			return nil, err
 		}
-		doc := binary.BigEndian.Uint32(docBuf)
-
-		// fecha de nacimiento (10)
-		birthBuf, err := safe_socket.RecvAll(cp.conn, BIRTHDATE_SIZE)
-		if err != nil {
-			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner birth date")
-			return nil, err
-		}
-
-		// apuesta (4)
-		numBuf, err := safe_socket.RecvAll(cp.conn, NUMBER_SIZE)
-		if err != nil {
-			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner number")
-			return nil, err
-		}
-		num := binary.BigEndian.Uint32(numBuf)
+		doc := binary.BigEndian.Uint32(fixedBuf[:DOCUMENT_SIZE])
+		birthBuf := fixedBuf[DOCUMENT_SIZE : DOCUMENT_SIZE+BIRTHDATE_SIZE]
+		num := binary.BigEndian.Uint32(fixedBuf[DOCUMENT_SIZE+BIRTHDATE_SIZE:])
 
 		// formatear línea resultado para guardar en OUTPUT_FILE
 		winnerLine := string(nameBuf) + "," + string(lastNameBuf) + "," + strconv.FormatUint(uint64(doc), 10) + "," + string(birthBuf) + "," + strconv.FormatUint(uint64(num), 10)
