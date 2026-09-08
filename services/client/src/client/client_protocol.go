@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -19,9 +18,6 @@ const (
 	DOCUMENT_SIZE         = 4
 	BIRTHDATE_SIZE        = 10
 	NUMBER_SIZE           = 4
-
-	NAME_MAX_LENGTH      = 255
-	LAST_NAME_MAX_LENGTH = 255
 )
 
 type ClientProtocol struct {
@@ -33,61 +29,26 @@ func NewClientProtocol(conn net.Conn, agencyId string) *ClientProtocol {
 	return &ClientProtocol{conn: conn, AgencyId: agencyId}
 }
 
-func (cp *ClientProtocol) SendBatch(lines [][]byte) error {
-
-	type parsedBet struct {
-		firstName, lastName, birthdate []byte
-		docNum, betNum                 uint32
-	}
-
+func (cp *ClientProtocol) SendBatch(bets []Bet) error {
 	agencyIdNum, err := strconv.Atoi(cp.AgencyId)
 	if err != nil {
 		logger.Warn("send-batch", logger.Fail, "error", "invalid agency ID")
 		return err
 	}
 
-	bets := make([]parsedBet, 0, len(lines))
 	totalSize := AGENCY_ID_SIZE + BATCH_COUNT_SIZE
-	for _, line := range lines {
-		parts := bytes.SplitN(line, []byte(","), 5)
-		if len(parts) < 5 {
-			return errors.New("invalid bet format")
-		}
-		docNum, err := strconv.Atoi(string(parts[2]))
-		if err != nil {
-			return err
-		}
-		betNum, err := strconv.Atoi(string(parts[4]))
-		if err != nil {
-			return err
-		}
-		bet := parsedBet{
-			firstName: parts[0], lastName: parts[1],
-			birthdate: parts[3],
-			docNum:    uint32(docNum), betNum: uint32(betNum),
-		}
-		if len(bet.firstName) > NAME_MAX_LENGTH || len(bet.lastName) > LAST_NAME_MAX_LENGTH {
-			return errors.New("name too long")
-		}
-		totalSize += NAME_LENGTH_SIZE + len(bet.firstName) +
-			LAST_NAME_LENGTH_SIZE + len(bet.lastName) +
+	for _, bet := range bets {
+		totalSize += NAME_LENGTH_SIZE + len(bet.FirstName) +
+			LAST_NAME_LENGTH_SIZE + len(bet.LastName) +
 			DOCUMENT_SIZE + BIRTHDATE_SIZE + NUMBER_SIZE
-		bets = append(bets, bet)
 	}
 
 	payload := make([]byte, AGENCY_ID_SIZE+BATCH_COUNT_SIZE, totalSize)
 	binary.BigEndian.PutUint16(payload[0:], uint16(agencyIdNum))
 	binary.BigEndian.PutUint16(payload[2:], uint16(len(bets)))
+
 	for _, bet := range bets {
-		payload = append(payload, byte(len(bet.firstName)))
-		payload = append(payload, bet.firstName...)
-		payload = append(payload, byte(len(bet.lastName)))
-		payload = append(payload, bet.lastName...)
-		payload = payload[:len(payload)+DOCUMENT_SIZE]
-		binary.BigEndian.PutUint32(payload[len(payload)-DOCUMENT_SIZE:], bet.docNum)
-		payload = append(payload, bet.birthdate...)
-		payload = payload[:len(payload)+NUMBER_SIZE]
-		binary.BigEndian.PutUint32(payload[len(payload)-NUMBER_SIZE:], bet.betNum)
+		payload = encodeBet(payload, bet)
 	}
 
 	// enviamos el batch completo por la red
@@ -128,8 +89,7 @@ func (cp *ClientProtocol) SendEnd() error {
 	return err
 }
 
-func (cp *ClientProtocol) ReceiveWinners() ([]string, error) {
-
+func (cp *ClientProtocol) ReceiveWinners() ([]Bet, error) {
 	// cantidad de ganadores (4 bytes)
 	amountBuffer, err := safe_socket.RecvAll(cp.conn, 4)
 	if err != nil {
@@ -138,52 +98,73 @@ func (cp *ClientProtocol) ReceiveWinners() ([]string, error) {
 	}
 
 	winnersCount := binary.BigEndian.Uint32(amountBuffer)
-	winners := make([]string, 0, winnersCount)
+	winners := make([]Bet, 0, winnersCount)
 
 	for i := uint32(0); i < winnersCount; i++ {
-
-		// nombre
-		nameLenBuf, err := safe_socket.RecvAll(cp.conn, NAME_LENGTH_SIZE)
+		winner, err := decodeBet(cp.conn)
 		if err != nil {
-			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner name length")
+			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner")
 			return nil, err
 		}
-		nameLen := int(nameLenBuf[0])
-
-		nameBuf, err := safe_socket.RecvAll(cp.conn, nameLen)
-		if err != nil {
-			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner name")
-			return nil, err
-		}
-
-		// apellido
-		lastNameLenBuf, err := safe_socket.RecvAll(cp.conn, LAST_NAME_LENGTH_SIZE)
-		if err != nil {
-			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner last name length")
-			return nil, err
-		}
-		lastNameLen := int(lastNameLenBuf[0])
-
-		lastNameBuf, err := safe_socket.RecvAll(cp.conn, lastNameLen)
-		if err != nil {
-			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner last name")
-			return nil, err
-		}
-
-		// campos fijos: documento (4) + fecha nacimiento (10) + numero (4) = 18 bytes
-		fixedBuf, err := safe_socket.RecvAll(cp.conn, DOCUMENT_SIZE+BIRTHDATE_SIZE+NUMBER_SIZE)
-		if err != nil {
-			logger.Warn("receive-winners", logger.Fail, "error", "failed to receive winner fixed fields")
-			return nil, err
-		}
-		doc := binary.BigEndian.Uint32(fixedBuf[:DOCUMENT_SIZE])
-		birthBuf := fixedBuf[DOCUMENT_SIZE : DOCUMENT_SIZE+BIRTHDATE_SIZE]
-		num := binary.BigEndian.Uint32(fixedBuf[DOCUMENT_SIZE+BIRTHDATE_SIZE:])
-
-		// formatear línea resultado para guardar en OUTPUT_FILE
-		winnerLine := string(nameBuf) + "," + string(lastNameBuf) + "," + strconv.FormatUint(uint64(doc), 10) + "," + string(birthBuf) + "," + strconv.FormatUint(uint64(num), 10)
-		winners = append(winners, winnerLine)
+		winners = append(winners, winner)
 	}
 
 	return winners, nil
+}
+
+func encodeBet(payload []byte, bet Bet) []byte {
+	firstNameBytes := []byte(bet.FirstName)
+	lastNameBytes := []byte(bet.LastName)
+	birthdateBytes := []byte(bet.Birthdate)
+
+	payload = append(payload, byte(len(firstNameBytes)))
+	payload = append(payload, firstNameBytes...)
+	payload = append(payload, byte(len(lastNameBytes)))
+	payload = append(payload, lastNameBytes...)
+	payload = payload[:len(payload)+DOCUMENT_SIZE]
+	binary.BigEndian.PutUint32(payload[len(payload)-DOCUMENT_SIZE:], bet.Document)
+	payload = append(payload, birthdateBytes...)
+	payload = payload[:len(payload)+NUMBER_SIZE]
+	binary.BigEndian.PutUint32(payload[len(payload)-NUMBER_SIZE:], bet.Number)
+
+	return payload
+}
+
+func decodeBet(conn net.Conn) (Bet, error) {
+	// nombre
+	nameLenBuf, err := safe_socket.RecvAll(conn, NAME_LENGTH_SIZE)
+	if err != nil {
+		return Bet{}, err
+	}
+	nameBuf, err := safe_socket.RecvAll(conn, int(nameLenBuf[0]))
+	if err != nil {
+		return Bet{}, err
+	}
+
+	// apellido
+	lastNameLenBuf, err := safe_socket.RecvAll(conn, LAST_NAME_LENGTH_SIZE)
+	if err != nil {
+		return Bet{}, err
+	}
+	lastNameBuf, err := safe_socket.RecvAll(conn, int(lastNameLenBuf[0]))
+	if err != nil {
+		return Bet{}, err
+	}
+
+	// campos fijos: documento (4) + fecha nacimiento (10) + numero (4) = 18 bytes
+	fixedBuf, err := safe_socket.RecvAll(conn, DOCUMENT_SIZE+BIRTHDATE_SIZE+NUMBER_SIZE)
+	if err != nil {
+		return Bet{}, err
+	}
+	doc := binary.BigEndian.Uint32(fixedBuf[:DOCUMENT_SIZE])
+	birthBuf := fixedBuf[DOCUMENT_SIZE : DOCUMENT_SIZE+BIRTHDATE_SIZE]
+	num := binary.BigEndian.Uint32(fixedBuf[DOCUMENT_SIZE+BIRTHDATE_SIZE:])
+
+	return Bet{
+		FirstName: string(nameBuf),
+		LastName:  string(lastNameBuf),
+		Document:  doc,
+		Birthdate: string(birthBuf),
+		Number:    num,
+	}, nil
 }

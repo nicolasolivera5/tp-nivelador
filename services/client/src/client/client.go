@@ -1,19 +1,20 @@
 package client
 
 import (
-	"bufio"
 	"net"
 	"os"
-	"strconv"
-	"time"
-	"syscall"
 	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 )
 
-const CONNECTION_ATTEMPTS_MAX = 3
-const CONNECTION_ATTEMPS_DELAY_MS = 2000
+const (
+	ConnectionAttemptsMax     = 3
+	ConnectionAttemptsDelayMs = 2000
+	DefaultBatchSize          = 10
+)
 
 type ClientConfig struct {
 	ServerHost string
@@ -21,15 +22,20 @@ type ClientConfig struct {
 	AgencyId   string
 	InputFile  string
 	OutputFile string
+	BatchSize  int
 }
 
 type Client struct {
-	conn   net.Conn
-	config ClientConfig
+	conn     net.Conn
+	config   ClientConfig
 	protocol *ClientProtocol
 }
 
 func NewClient(config ClientConfig) (*Client, error) {
+	if config.BatchSize <= 0 {
+		config.BatchSize = DefaultBatchSize
+	}
+
 	conn, err := connectToServer(config.ServerHost, config.ServerPort)
 	if err != nil {
 		logger.Warn("connect-to-server", logger.Fail)
@@ -48,11 +54,11 @@ func connectToServer(host, port string) (net.Conn, error) {
 	var conn net.Conn
 
 	logger.Info(action, logger.InProgress)
-	for i := range CONNECTION_ATTEMPTS_MAX {
+	for i := range ConnectionAttemptsMax {
 		conn, err = net.Dial("tcp", host+":"+port)
 		if err != nil {
 			logger.Warn(action, logger.Fail, "attempt", i)
-			time.Sleep(CONNECTION_ATTEMPS_DELAY_MS * time.Millisecond)
+			time.Sleep(ConnectionAttemptsDelayMs * time.Millisecond)
 			continue
 		}
 
@@ -72,54 +78,36 @@ func (client *Client) Run() error {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
 	go func() {
-        <-sigChan
-        isShuttingDown = true
-        logger.Info("client-shutdown", logger.Success, "reason", "SIGTERM received")
-        client.conn.Close()
-    }()
+		<-sigChan
+		isShuttingDown = true
+		logger.Info("client-shutdown", logger.Success, "reason", "SIGTERM received")
+		client.conn.Close()
+	}()
 
-	batchSizeStr := os.Getenv("BATCH_SIZE")
-	batchSize, err := strconv.Atoi(batchSizeStr)
-	if err != nil || batchSize <= 0 {
-		batchSize = 10 
-	}
-
-	inputFile, err := os.Open(client.config.InputFile)
+	batchReader, err := NewBetBatchReader(client.config.InputFile, client.config.BatchSize)
 	if err != nil {
 		logger.Error("open-input-file", logger.Fail, "err", err)
 		return err
 	}
-	defer inputFile.Close()
+	defer batchReader.Close()
 
-	outputFile, err := os.Create(client.config.OutputFile)
-	if err != nil {
-		logger.Error("create-output-file", logger.Fail, "err", err)
-		return err
-	}
-	defer outputFile.Close()
+	batch := make([]Bet, 0, client.config.BatchSize)
 
-	scanner := bufio.NewScanner(inputFile)
-	batch := make([][]byte, 0, batchSize)
-
-	for scanner.Scan() {
-		line := append([]byte(nil), scanner.Bytes()...)
-		batch = append(batch, line)
-
-		if len(batch) == batchSize {
-			if err := client.protocol.SendBatch(batch); err != nil {
-				logger.Error("send-batch", logger.Fail, "err", err)
-				return err
-			}
-			batch = batch[:0] 
+	for {
+		batch, err := batchReader.NextBatch(batch)
+		if err != nil {
+			logger.Error("read-batch", logger.Fail, "err", err)
+			return err
 		}
-	}
+		if len(batch) == 0 {
+			break
+		}
 
-	// enviamos si las lineas que quedaron en el batch
-	if len(batch) > 0 {
 		if err := client.protocol.SendBatch(batch); err != nil {
 			logger.Error("send-batch", logger.Fail, "err", err)
 			return err
 		}
+
 	}
 
 	if err := client.protocol.SendEnd(); err != nil {
@@ -129,25 +117,18 @@ func (client *Client) Run() error {
 
 	winners, err := client.protocol.ReceiveWinners()
 	if err != nil {
-
 		if isShuttingDown {
-            // Si el error ocurrió debido a la cancelación por SIGTERM, es un apagado limpio
-            return nil
-        }
-		
+			// si el error ocurrió debido a la cancelación por SIGTERM, es un apagado limpio
+			return nil
+		}
 		logger.Error("receive-winners", logger.Fail, "err", err)
 		return err
 	}
 
-	writer := bufio.NewWriter(outputFile)
-	for _, winner := range winners {
-		if _, err := writer.WriteString(winner + "\n"); err != nil {
-			logger.Error("write-output-file", logger.Fail, "err", err)
-			return err
-		}
+	if err := SaveWinners(client.config.OutputFile, winners); err != nil {
+		logger.Error("save-winners", logger.Fail, "err", err)
+		return err
 	}
-
-	writer.Flush()
 
 	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
 	return nil
