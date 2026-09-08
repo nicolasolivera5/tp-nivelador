@@ -71,6 +71,10 @@ class Server:
             self.client_threads.append(client_handle)
 
         for t in self.client_threads:
+            try:
+                t.client_socket.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
             t.join()
 
         logger.info("server-shutdown", logger.LogResult.success)
