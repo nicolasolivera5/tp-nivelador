@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 	"strconv"
-
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
 )

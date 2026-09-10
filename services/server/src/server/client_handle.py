@@ -5,7 +5,6 @@ from lottery.lottery import Lottery, Bet
 from .server_protocol import ServerProtocol
 from .rw_lock import ReadWriteLock
 
-
 class ClientHandle(threading.Thread):
     def __init__(
         self,

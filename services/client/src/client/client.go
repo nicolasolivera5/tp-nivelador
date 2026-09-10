@@ -6,7 +6,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 )
 
