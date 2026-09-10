@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	ConnectionAttemptsMax     = 3
-	ConnectionAttemptsDelayMs = 2000
-	DefaultBatchSize          = 10
+	CONNECTION_ATTEMPTS_MAX      = 3
+	CONNECTION_ATTEMPTS_DELAY_MS = 2000
+	DEFAULT_BATCH_SIZE           = 10
 )
 
 type ClientConfig struct {
@@ -33,7 +33,7 @@ type Client struct {
 
 func NewClient(config ClientConfig) (*Client, error) {
 	if config.BatchSize <= 0 {
-		config.BatchSize = DefaultBatchSize
+		config.BatchSize = DEFAULT_BATCH_SIZE
 	}
 
 	conn, err := connectToServer(config.ServerHost, config.ServerPort)
@@ -54,11 +54,11 @@ func connectToServer(host, port string) (net.Conn, error) {
 	var conn net.Conn
 
 	logger.Info(action, logger.InProgress)
-	for i := range ConnectionAttemptsMax {
+	for i := range CONNECTION_ATTEMPTS_MAX {
 		conn, err = net.Dial("tcp", host+":"+port)
 		if err != nil {
 			logger.Warn(action, logger.Fail, "attempt", i)
-			time.Sleep(ConnectionAttemptsDelayMs * time.Millisecond)
+			time.Sleep(CONNECTION_ATTEMPTS_DELAY_MS * time.Millisecond)
 			continue
 		}
 

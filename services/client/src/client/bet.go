@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	NameMaxLength     = 255
-	LastNameMaxLength = 255
+	NAME_MAX_LENGTH      = 255
+	LAST_NAME_MAX_LENGTH = 255
 )
 
 type Bet struct {
@@ -28,7 +28,7 @@ func ParseBetCSV(line []byte) (Bet, error) {
 	firstName := string(parts[0])
 	lastName := string(parts[1])
 
-	if len(firstName) > NameMaxLength || len(lastName) > LastNameMaxLength {
+	if len(firstName) > NAME_MAX_LENGTH || len(lastName) > LAST_NAME_MAX_LENGTH {
 		return Bet{}, errors.New("name too long")
 	}
 
